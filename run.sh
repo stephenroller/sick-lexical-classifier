@@ -6,7 +6,8 @@ export GLOBAL_OPTIONS=""
 function run_setting {
     outputname=$1
     shift
-    echo condorizer --output output/log.${outputname} "python eval.py $GLOBAL_OPTIONS --output output/$outputname $@"
+	rm -rf output/${outputname}/sick_test.txt.idx output/${outputname}/sick_train.txt.cv.idx
+    condorizer --output output/log.${outputname} python eval.py $GLOBAL_OPTIONS --output output/$outputname $@
 }
 
 # export GLOBAL_OPTIONS="--detailed" # uncomment for extra output
@@ -15,6 +16,9 @@ function run_setting {
 
 # neutral setting, always guess baseline behavior
 run_setting neu
+
+# gold weight setting
+run_setting gold --gold
 
 # base features only
 run_setting base --head --align --base

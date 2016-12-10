@@ -26,7 +26,22 @@ from sklearn.metrics import confusion_matrix
 from nltk.corpus import wordnet
 
 import utdeftvs
-from corenlp_depextract import preprocess_with_corenlp, parse_corenlp_xml, extract_relations_for_token
+
+# load up spacy and override it to use fixed whitespace.
+import spacy
+from spacy.tokens import Doc
+class WhitespaceTokenizer(object):
+    def __init__(self, nlp):
+        self.vocab = nlp.vocab
+
+    def __call__(self, text):
+        words = text.split(' ')
+        # All tokens 'own' a subsequent space character in this tokenizer
+        spaces = [True] * len(words)
+        return Doc(self.vocab, words=words, spaces=spaces)
+
+english = spacy.en.English()
+english.make_doc = WhitespaceTokenizer(english)
 
 # this was the final data set
 DATA_FILE = "data/sick_train.txt"
@@ -50,7 +65,6 @@ DEP_SPACE = os.path.join(SPACE_ROOT, "dependency.svd300.ppmi.top250k.top1m.npz")
 # FEATURE SETTINGS
 ENABLE_MEMO = False
 ENABLE_WF = False
-ENABLE_PX = False
 ENABLE_DIST = False
 ENABLE_WN = False
 ENABLE_BASE = False
@@ -60,12 +74,10 @@ ENABLE_LEFTVEC = False
 ENABLE_RIGHTVEC = False
 ENABLE_ISLAM = False
 
-
 ENABLE_ALIGNMENT = False
 ENABLE_HEAD  = False
 
 ENABLE_DETAILED = False
-
 
 def percentage(binary_array):
     return float(np.sum(binary_array)) / binary_array.shape[0]
@@ -126,6 +138,9 @@ def parse_islam_sentence(text, original_text):
         retval.append((t, pos, position_of_tokens[j]))
     return retval
 
+def lemma_pos(token):
+    return token.lemma_ + "/" +  token.tag_[:2]
+
 def find_alignments(left_tokens, right_tokens, space):
     #left_tokens = set([l for l in left_tokens if l.is_content_word])
     #right_tokens = set([r for r in right_tokens if r.is_content_word])
@@ -134,7 +149,7 @@ def find_alignments(left_tokens, right_tokens, space):
 
     retval = []
     while left_tokens and right_tokens:
-        scores = [(l, r, cosine_w(space, l.lemma_pos, r.lemma_pos))
+        scores = [(l, r, cosine_w(space, lemma_pos(l), lemma_pos(r)))
                   for l in left_tokens for r in right_tokens]
         l, r, s = max(scores, key=lambda x: x[2])
         retval.append((l, r))
@@ -147,8 +162,8 @@ def extract_wordnet_features(corenlp_left, corenlp_right):
     if not ENABLE_WN:
         return {}
 
-    left_synsets = wordnet.synsets(corenlp_left.lemma)
-    right_synsets = wordnet.synsets(corenlp_right.lemma)
+    left_synsets = wordnet.synsets(corenlp_left.lemma_)
+    right_synsets = wordnet.synsets(corenlp_right.lemma_)
 
     left_synsets = [l for l in left_synsets]
     right_synsets = [r for r in right_synsets]
@@ -247,41 +262,16 @@ def bin_feature(hashtable, featurename, value):
         hashtable[n] = (asfloat < value <= upper)
     return hashtable
 
-def extract_pengxiang_features(row):
-    if not ENABLE_PX or 'meanSim' not in row:
-        return {}
-
-
-    cos = row['meanSim']
-    cosGreedy = np.array([float(f) for f in row['greedySim'].split(", ")])
-
-    covered = (row['meanSim'] == -1)
-    coveredTwo = (row['meanSim'] == -2)
-
-    retval = {
-        'px|cosine': max(cos, 0.0),
-        'px|couldnt_compute': covered,
-        'px|couldnt_compute2': coveredTwo,
-    }
-    retval = bin_feature(retval, 'px|cosine', cos)
-
-    retval = bin_feature(retval, 'px|cosineGreedyMax', np.max(cosGreedy))
-    retval = bin_feature(retval, 'px|cosineGreedyMin', np.min(cosGreedy))
-    retval = bin_feature(retval, 'px|cosineGreedyMean', np.mean(cosGreedy))
-    return retval
-
-
-
 def extract_distributional_features(left, right):
     if not ENABLE_DIST:
         return {}
 
     features = {}
     try:
-        bow_left_vector = bow_space[left.lemma_pos]
-        bow_right_vector = bow_space[right.lemma_pos]
-        dep_left_vector = dep_space[left.lemma_pos]
-        dep_right_vector = dep_space[right.lemma_pos]
+        bow_left_vector = bow_space[lemma_pos(left)]
+        bow_right_vector = bow_space[lemma_pos(right)]
+        dep_left_vector = dep_space[lemma_pos(left)]
+        dep_right_vector = dep_space[lemma_pos(right)]
     except KeyError:
         return {
             #'dist|cosine_bow': 0.0,
@@ -344,24 +334,24 @@ def extract_word_features(left, right):
         return {}
 
     return {
-        'wf|same_word': left.word == right.word,
-        'wf|same_lemma': left.lemma == right.lemma,
-        'wf|same_shortpos': left.shortpos == right.shortpos,
-        'wf|same_pos': left.pos == right.pos,
-        'wf|left_noun': left.shortpos == 'NN',
-        'wf|left_adj': left.shortpos == 'JJ',
-        'wf|left_verb': left.shortpos == 'VB',
-        'wf|left_adverb': left.shortpos == 'RB',
-        'wf|right_noun': right.shortpos == 'NN',
-        'wf|right_adj': right.shortpos == 'JJ',
-        'wf|right_verb': right.shortpos == 'VB',
-        'wf|right_adverb': right.shortpos == 'RB',
-        'wf|left_singular': left.pos in ('NN', 'NNP'),
-        'wf|left_plural': left.pos in ('NNS', 'NNPS'),
-        'wf|right_singular': right.pos in ('NN', 'NNP'),
-        'wf|right_plural': right.pos in ('NNS', 'NNPS'),
-        'wf|both_singular': (right.pos in ('NN', 'NNP')) and (left.pos in ('NN', 'NNP')),
-        'wf|both_plural': (right.pos in ('NNS', 'NNPS')) and (left.pos in ('NNS', 'NNP')),
+        'wf|same_word': left.orth_ == right.orth_,
+        'wf|same_lemma': left.lemma_ == right.lemma_,
+        'wf|same_shortpos': left.pos_ == right.pos_,
+        'wf|same_pos': left.tag_ == right.tag_,
+        'wf|left_noun': left.tag_[:2] == 'NN',
+        'wf|left_adj': left.tag_[:2] == 'JJ',
+        'wf|left_verb': left.tag_[:2] == 'VB',
+        'wf|left_adverb': left.tag_[:2] == 'RB',
+        'wf|right_noun': right.tag_[:2] == 'NN',
+        'wf|right_adj': right.tag_[:2] == 'JJ',
+        'wf|right_verb': right.tag_[:2] == 'VB',
+        'wf|right_adverb': right.tag_[:2] == 'RB',
+        'wf|left_singular': left.tag_ in ('NN', 'NNP'),
+        'wf|left_plural': left.tag_ in ('NNS', 'NNPS'),
+        'wf|right_singular': right.tag_ in ('NN', 'NNP'),
+        'wf|right_plural': right.tag_ in ('NNS', 'NNPS'),
+        'wf|both_singular': (right.tag_ in ('NN', 'NNP')) and (left.tag_ in ('NN', 'NNP')),
+        'wf|both_plural': (right.tag_ in ('NNS', 'NNPS')) and (left.tag_ in ('NNS', 'NNP')),
     }
 
 def feature_union(*featuresets):
@@ -388,41 +378,58 @@ def extract_lexical_features(list_of_tokens):
     #print [t.shortpos for t in list_of_tokens]
     RBs = [t for t in list_of_tokens if t.shortpos == 'RB']
     z = {
-        'lex|' + t.lemma_pos: 1.0
+        'lex|' + lemma_pos(t): 1.0
         for t in RBs
     }
     return z
     #print list_of_tokens
+
+def find_tokens(sentence, islam_tokens):
+    retval = []
+    for t, s, p in islam_tokens:
+        possible = [token for token in sentence if token.orth_ == t]
+        if not possible:
+            print t
+            print sentence
+            print "wasnt possible"
+        else:
+            found = min(possible, key=lambda x: np.square(x.idx - p))
+            retval.append(found)
+    return retval
+
+def bfs(root):
+    # breadth first search
+    yield root
+    for c in root.children:
+        for n in bfs(c):
+            yield n
+
+def find_head(sentence, tokens):
+    if not tokens:
+        raise ValueError("Can't find the headmost of an empty token list!")
+    tokens = set(tokens)
+    for node in bfs(sentence.root):
+        if node in tokens:
+            return node
+    raise ValueError("None of them were in in the sentence.")
 
 
 def generate_features(irow, dist_space):
     i, row = irow
     corenlp_left_sentence = row['corenlp_left']
     corenlp_right_sentence = row['corenlp_right']
-    #if i % 100 == 0:
-    #    #sys.stderr.write("Generating features for %d/%d...\n" % (i, len(data)))
-    #    pass
-    #corenlp_left_sentence = corenlp_sentences[i]
-    #corenlp_right_sentence = corenlp_sentences[len(data)+i]
-
-
 
     left_tokens_raw = parse_islam_sentence(row['lhsText'], row['text'])
-    left_tokens = corenlp_left_sentence.extract_tokens([s for t, p, s in left_tokens_raw])
     right_tokens_raw = parse_islam_sentence(row['rhsText'], row['hypothesis'])
-    right_tokens = corenlp_right_sentence.extract_tokens([s for t, p, s in right_tokens_raw])
 
-    plain_left = "_".join(l.lemma for l in left_tokens)
-    plain_right = "_".join(r.lemma for r in right_tokens)
+    left_tokens = find_tokens(corenlp_left_sentence, left_tokens_raw)
+    right_tokens = find_tokens(corenlp_right_sentence, right_tokens_raw)
 
-    left_head = corenlp_left_sentence.find_head(left_tokens)
-    if not left_head:
-        left_head = left_tokens[-1]
-    right_head = corenlp_right_sentence.find_head(right_tokens)
-    if not right_head:
-        right_head = right_tokens[-1]
+    plain_left = "_".join(l.lemma_ for l in left_tokens)
+    plain_right = "_".join(r.lemma_ for r in right_tokens)
 
-
+    left_head = find_head(corenlp_left_sentence, left_tokens)
+    right_head = find_head(corenlp_right_sentence, right_tokens)
 
     if not left_tokens or not right_tokens or not left_head or not right_head:
         return
@@ -484,7 +491,6 @@ def generate_features(irow, dist_space):
             extract_wordnet_features(left_head, right_head),
             extract_distributional_features(left_head, right_head),
             extract_islams_features(row),
-            extract_pengxiang_features(row),
             extract_asym_features(left_head, right_head, "dep", dist_space),
         )
         if ENABLE_LEFTVEC:
@@ -492,6 +498,10 @@ def generate_features(irow, dist_space):
         if ENABLE_RIGHTVEC:
             final_features = feature_union(final_features, extract_vecraw_features(right_head, "rightdep", dep_space))
         final_features = feature_union(final_features, features_from_head)
+
+    if not final_features:
+        # sklearn freaks if we give it an empty vector
+        final_features['empty|empty'] = 0
     return final_features
 
 def klassifier_factory():
@@ -566,8 +576,8 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     for result in results:
         probas[result['test_fold']] = result['predictions_proba']
 
-    sys.stderr.write("Confusion matrix: (prediction \\ true)\n")
-    sys.stderr.write(str(confusion_matrix(predictions, Y) / float(len(predictions))))
+    sys.stderr.write("Confusion matrix: (true \\ prediction)\n")
+    sys.stderr.write(str(confusion_matrix(Y, predictions) / float(len(predictions))))
     sys.stderr.write("\n")
 
     sys.stderr.write("Outputting stuff for analysis...\n")
@@ -585,7 +595,7 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     data['prob_ent'] = probas[:,2]
     data['prob_pred'] = probas.max(axis=1)
     if not output_filename.startswith("None"):
-        original_data.to_csv(output_filename + ".cv.txt", sep="\t", index=False)
+        original_data.to_csv(output_filename + ".cv", sep="\t", index=False)
     if not output_filename.startswith("None") and ENABLE_DETAILED:
         del data['corenlp_left']
         del data['corenlp_right']
@@ -593,7 +603,7 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
             del data['asym|dep_delta']
             del data['asym|dep_delta_sq']
         data['error_class'] = [name_error_class(row) for i, row in data.iterrows()]
-        data.to_csv(output_filename + '.cvdetailed.txt', sep="\t", index=False)
+        data.to_csv(output_filename + '.detailedcv', sep="\t", index=False)
     sys.stderr.write("\n")
 
 def predict_test(output_filename, X, Y, Xt, original_test, test_data):
@@ -617,7 +627,7 @@ def predict_test(output_filename, X, Y, Xt, original_test, test_data):
     test_data['prob_pred'] = probas.max(axis=1)
 
     if not output_filename.startswith("None"):
-        original_test.to_csv(output_filename + ".test.txt", sep="\t", index=False)
+        original_test.to_csv(output_filename, sep="\t", index=False)
     test_data['w'] =  predictions
     if not output_filename.startswith("None") and ENABLE_DETAILED:
         del test_data['corenlp_left']
@@ -638,6 +648,11 @@ def predict_test(output_filename, X, Y, Xt, original_test, test_data):
                     f.write("  %5.2f  %s\n" % (v, l))
                 f.write("\n")
 
+def parse_sentences(arr):
+    unicode_arr = map(unicode, arr)
+    processed = (english.pipe(unicode_arr, entity=False, n_threads=10))
+    sentences = (d.sents.next() for d in processed)
+    return list(sentences)
 
 if __name__ == '__main__':
 
@@ -647,7 +662,6 @@ if __name__ == '__main__':
     parser.add_argument('--memo', action='store_true')
     parser.add_argument('--islam', action='store_true')
     parser.add_argument('--wf', action='store_true')
-    parser.add_argument('--px', action='store_true')
     parser.add_argument('--dist', action='store_true')
     parser.add_argument('--wn', action='store_true')
     parser.add_argument('--base', action='store_true')
@@ -671,7 +685,6 @@ if __name__ == '__main__':
     ENABLE_ISLAM = args.islam
     ENABLE_MEMO = args.memo
     ENABLE_WF = args.wf
-    ENABLE_PX = args.px
     ENABLE_DIST = args.dist
     ENABLE_WN = args.wn
     ENABLE_BASE = args.base
@@ -699,22 +712,11 @@ if __name__ == '__main__':
     data = pd.read_table(DATA_FILE)
     test_data = pd.read_table(TEST_FILE)
 
-
-
-    sys.stderr.write("Parsing with corenlp...\n")
-    sentences = list(data['text']) + list(data['hypothesis'])
-    corenlp_xml = preprocess_with_corenlp(DATA_FILE + ".plaintext", sentences)
-    corenlp_sentences = parse_corenlp_xml(corenlp_xml, collapse_particle_verbs=False)
-
-    sentences_test = list(test_data['text']) + list(test_data['hypothesis'])
-    corenlp_xml_test = preprocess_with_corenlp(TEST_FILE + ".plaintext", sentences_test)
-    corenlp_sentences_test = parse_corenlp_xml(corenlp_xml_test, collapse_particle_verbs=False)
-
-    sys.stderr.write("Filtering...\n")
-    data['corenlp_left'] = corenlp_sentences[:len(data)]
-    data['corenlp_right'] = corenlp_sentences[len(data):]
-    test_data['corenlp_left'] = corenlp_sentences_test[:len(test_data)]
-    test_data['corenlp_right'] = corenlp_sentences_test[len(test_data):]
+    sys.stderr.write("Parsing...\n")
+    data['corenlp_left'] = parse_sentences(data['text'])
+    data['corenlp_right'] = parse_sentences(data['hypothesis'])
+    test_data['corenlp_left'] = parse_sentences(test_data['text'])
+    test_data['corenlp_right'] = parse_sentences(test_data['hypothesis'])
 
     if args.solo:
         # only look at items that need a single rule
@@ -791,7 +793,7 @@ if __name__ == '__main__':
     #for vector_feature in VECTOR_FEATURES:
     #    X = np.concatenate((X, np.array(list(data[vector_feature]))), axis=1)
 
-    predict_test("%s_%s.test" % (args.output, basename(TEST_FILE)), X, Y, Xt, original_test, test_data)
+    predict_test("%s/%s" % (args.output, basename(TEST_FILE)), X, Y, Xt, original_test, test_data)
 
     # time for actual machine learning
 
@@ -805,5 +807,5 @@ if __name__ == '__main__':
     # look up each group number to determine the fold
     skf = cross_validation.LeaveOneLabelOut([splitLookup[sickID] for sickID in data['pairIndex']])
 
-    run_crossval("%s_%s.train" % (args.output, basename(DATA_FILE)), X, Y, skf, original_data, data)
+    run_crossval("%s/%s" % (args.output, basename(DATA_FILE)), X, Y, skf, original_data, data)
 
