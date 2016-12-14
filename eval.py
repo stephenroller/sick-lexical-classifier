@@ -47,12 +47,7 @@ english.make_doc = WhitespaceTokenizer(english)
 DATA_FILE = "data/sick_train.txt"
 TEST_FILE = "data/sick_test.txt"
 
-
 POS_MAP = {'n': 'NN', 'v': 'VB', 'a': 'JJ', 'r': 'RB', 's': 'JJ'}
-# preprocess lemmatize!
-LEMMATIZE = True
-POS = True
-MAX_ITER = 20000
 
 RANDOM_SEED = 31337
 NUM_CROSS_VAL = 10
@@ -72,7 +67,6 @@ ENABLE_GOLD = False
 ENABLE_ASYM = False
 ENABLE_LEFTVEC = False
 ENABLE_RIGHTVEC = False
-ENABLE_ISLAM = False
 
 ENABLE_ALIGNMENT = False
 ENABLE_HEAD  = False
@@ -95,7 +89,6 @@ def name_error_class(row):
         return 'FALSE_POSITIVE'
     else:
         return 'OTHER'
-
 
 def norm(v):
     magn = np.sqrt(v.dot(v))
@@ -142,8 +135,6 @@ def lemma_pos(token):
     return token.lemma_ + "/" +  token.tag_[:2]
 
 def find_alignments(left_tokens, right_tokens, space):
-    #left_tokens = set([l for l in left_tokens if l.is_content_word])
-    #right_tokens = set([r for r in right_tokens if r.is_content_word])
     left_tokens = set(left_tokens)
     right_tokens = set(right_tokens)
 
@@ -181,34 +172,21 @@ def extract_wordnet_features(corenlp_left, corenlp_right):
         key=lambda x: x[0])
 
     if not len(left_synsets) or not len(right_synsets):
-        #print "true oown:", len(left_synsets), corenlp_left, len(right_synsets), corenlp_right
         pass
 
     if not wn_left or not wn_right:
         return {
             'wn|out_of_wordnet': True,
-            #'wn|shortest_path_distance': 100,
-            #'wn|wupsim': 0.0,
-            #'wn|lchsim': 0.0,
             'wn|pathsim': 0.0,
-            #'wn|is_hyper': False,
-            #'wn|is_hypo': False,
             'wn|is_hyper_strict': False,
             'wn|is_hypo_strict': False,
             'wn|is_syn': False,
             'wn|is_ant': False,
-            #'distance_lower_left': 100,
-            #'distance_lower_right': 100,
-            #'total_distance': 200,
         }
 
     features = {}
     features['wn|pathsim'] = wn_pathsim
     features = bin_feature(features, 'wn|pathsim', wn_pathsim)
-    #features['wn|wupsim'] = wn_left.wup_similarity(wn_right)
-    #features['wn|lchsim'] = (wn_left == wn_right) and 1.0 or wn_left.lch_similarity(wn_right)
-
-    #features['wn|shortest_path'] = (wn_left.shortest_path_distance(wn_right))
 
     lowest_common_hyper = wn_left.lowest_common_hypernyms(wn_right)
     if lowest_common_hyper:
@@ -216,11 +194,7 @@ def extract_wordnet_features(corenlp_left, corenlp_right):
     else:
         lowest_common_hyper = None
 
-    #features['wn|is_hyper'] = (lowest_common_hyper == wn_left)
-    #features['wn|is_hyper_strict'] = (lowest_common_hyper == wn_left and wn_left != wn_right)
     features['wn|is_hyper_strict'] = (wn_left != wn_right) and (wn_left in wn_right.hypernym_paths()[0])
-    #features['wn|is_hypo'] =  (lowest_common_hyper == wn_right)
-    #features['wn|is_hypo_strict'] =  (lowest_common_hyper == wn_right and wn_left != wn_right)
     features['wn|is_hypo_strict'] = (wn_left != wn_right) and (wn_right in wn_left.hypernym_paths()[0])
     features['wn|is_syn'] = (wn_left == wn_right)
 
@@ -230,27 +204,9 @@ def extract_wordnet_features(corenlp_left, corenlp_right):
         lhs_antos.update(lemma.antonyms())
     features['wn|is_ant'] = any(r in lhs_antos for r in rhs_lemmas)
 
-    #features['distance_lower_left'] = wn_left.max_depth() - lowest_common_hyper.max_depth()
-    #features['distance_lower_right'] = wn_right.max_depth() - lowest_common_hyper.max_depth()
-    #features['total_distance'] = features['distance_lower_left'] + features['distance_lower_right']
-
     features['wn|out_of_wordnet'] = False
 
     return features
-
-def extract_islams_features(row):
-    if not ENABLE_ISLAM:
-        return {}
-    return {
-        'islam|hypernym': row['isInWordnet'] == 'Hypernymn',
-        'islam|antonym':  row['isInWordnet'] == 'Antonym',
-        'islam|synonym':  row['isInWordnet'] == 'Synonym',
-        'islam|hyponym':  row['isInWordnet'] == 'Hyponym',
-        'islam|phrasal':  row['isInWordnet'] == 'Phrasal',
-        'islam|extentionLevel0': row['extentionLevel'] == 0,
-        'islam|extentionLevel1': row['extentionLevel'] == 1,
-        'islam|extentionLevel2': row['extentionLevel'] == 2,
-    }
 
 def bin_feature(hashtable, featurename, value):
     hashtable[featurename + "=0.00"] = (value == 0.0)
@@ -274,8 +230,6 @@ def extract_distributional_features(left, right):
         dep_right_vector = dep_space[lemma_pos(right)]
     except KeyError:
         return {
-            #'dist|cosine_bow': 0.0,
-            #'dist|cosine_dep': 0.0,
             'dist|out_of_dist': True,
         }
 
@@ -303,8 +257,6 @@ def extract_vecraw_features(word, name, space):
     return {
         'vector|%s_delta' % name: vector,
     }
-
-
 
 def extract_asym_features(left, right, name, space):
     if not ENABLE_ASYM:
@@ -370,20 +322,6 @@ def feature_merge(list_of_featuresets, name=''):
 
     return output
 
-def extract_lexical_features(list_of_tokens):
-    #return {
-    #    'lex|' + t.shortpos: 1.0
-    #    for t in list_of_tokens
-    #}
-    #print [t.shortpos for t in list_of_tokens]
-    RBs = [t for t in list_of_tokens if t.shortpos == 'RB']
-    z = {
-        'lex|' + lemma_pos(t): 1.0
-        for t in RBs
-    }
-    return z
-    #print list_of_tokens
-
 def find_tokens(sentence, islam_tokens):
     retval = []
     for t, s, p in islam_tokens:
@@ -425,20 +363,19 @@ def generate_features(irow, dist_space):
     left_tokens = find_tokens(corenlp_left_sentence, left_tokens_raw)
     right_tokens = find_tokens(corenlp_right_sentence, right_tokens_raw)
 
-    plain_left = "_".join(l.lemma_ for l in left_tokens)
-    plain_right = "_".join(r.lemma_ for r in right_tokens)
-
     left_head = find_head(corenlp_left_sentence, left_tokens)
     right_head = find_head(corenlp_right_sentence, right_tokens)
 
     if not left_tokens or not right_tokens or not left_head or not right_head:
+        sys.stderr.write('No token or head (%d:"%s").\n' % (i, irow))
         return
 
     alignments, hanging_left, hanging_right = find_alignments(left_tokens, right_tokens, dist_space)
     if not alignments:
+        sys.stderr.write('No alignments (%d:"%s").\n' % (i, irow))
         return
 
-    final_features = {}
+    final_features = {'null|null': 0}
     gold_feature = {
         'gold|con': row['gsw'] == -1,
         'gold|neu': row['gsw'] == 0,
@@ -462,16 +399,9 @@ def generate_features(irow, dist_space):
     if ENABLE_BASE:
         final_features = feature_union(final_features, base_features)
 
-    memo_features = {'memo|%s&%s' % (plain_left, plain_right): True}
-    if ENABLE_MEMO:
-        final_features = feature_union(final_features, memo_features)
-
     if ENABLE_ALIGNMENT:
         features_from_alignment = []
         for left, right in alignments:
-            # TODO: HANDLE THIS CASE
-            #if left.lemma_pos == right.lemma_pos:
-            #    continue
             word_features = extract_word_features(left, right)
             wn_features = extract_wordnet_features(left, right)
             dist_features = extract_distributional_features(left, right)
@@ -479,11 +409,6 @@ def generate_features(irow, dist_space):
             features_from_alignment.append(all_features)
         features_from_alignment = feature_merge(features_from_alignment, 'align')
         final_features = feature_union(final_features, features_from_alignment)
-
-    #features_from_rhs = extract_lexical_features(hanging_right)
-
-    #final_features = feature_union(final_features, features_from_rhs)
-
 
     if ENABLE_HEAD:
         features_from_head = feature_union(
@@ -499,9 +424,6 @@ def generate_features(irow, dist_space):
             final_features = feature_union(final_features, extract_vecraw_features(right_head, "rightdep", dep_space))
         final_features = feature_union(final_features, features_from_head)
 
-    if not final_features:
-        # sklearn freaks if we give it an empty vector
-        final_features['empty|empty'] = 0
     return final_features
 
 def klassifier_factory():
@@ -519,7 +441,6 @@ def predict_fold(fold, X, Y):
 
     clf = klassifier_factory()
 
-    #scaler = sklearn.preprocessing.StandardScaler()
     scaler = sklearn.preprocessing.MinMaxScaler()
     train_X = scaler.fit_transform(train_X)
     test_X = scaler.transform(test_X)
@@ -655,12 +576,10 @@ def parse_sentences(arr):
     return list(sentences)
 
 if __name__ == '__main__':
-
     parser = argparse.ArgumentParser('Lexical Entailment Prediction')
 
     # feature sets
     parser.add_argument('--memo', action='store_true')
-    parser.add_argument('--islam', action='store_true')
     parser.add_argument('--wf', action='store_true')
     parser.add_argument('--dist', action='store_true')
     parser.add_argument('--wn', action='store_true')
@@ -682,7 +601,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    ENABLE_ISLAM = args.islam
     ENABLE_MEMO = args.memo
     ENABLE_WF = args.wf
     ENABLE_DIST = args.dist
@@ -738,7 +656,6 @@ if __name__ == '__main__':
     del original_test['corenlp_left']
     del original_test['corenlp_right']
 
-
     sys.stderr.write("Generating features...\n")
     extra_info_list = map(partial(generate_features, dist_space=dep_space), data.iterrows())
     extra_info_test = map(partial(generate_features, dist_space=dep_space), test_data.iterrows())
@@ -754,9 +671,8 @@ if __name__ == '__main__':
         FEATURES = FEATURES.union(ei.keys())
     FEATURES = list(FEATURES)
 
-    VECTOR_FEATURES = []
-
     # we need to separate out the vector features here
+    VECTOR_FEATURES = []
     for key in FEATURES:
         if type(data[key][0]) == np.ndarray:
             VECTOR_FEATURES.append(key)
@@ -789,9 +705,6 @@ if __name__ == '__main__':
     scaler = sklearn.preprocessing.MinMaxScaler()
     X = scaler.fit_transform(X)
     Xt = scaler.transform(Xt)
-
-    #for vector_feature in VECTOR_FEATURES:
-    #    X = np.concatenate((X, np.array(list(data[vector_feature]))), axis=1)
 
     predict_test("%s/%s" % (args.output, basename(TEST_FILE)), X, Y, Xt, original_test, test_data)
 

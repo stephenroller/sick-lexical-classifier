@@ -6,7 +6,11 @@ export GLOBAL_OPTIONS=""
 function run_setting {
     outputname=$1
     shift
+	# Make sure we delete the index so the MLN system has to regenerate it.
 	rm -rf output/${outputname}/sick_test.txt.idx output/${outputname}/sick_train.txt.cv.idx
+	# also make sure we have the folder to output stuff to
+	mkdir -p output/${outputname}
+	# actually run everything
     condorizer --output output/log.${outputname} python eval.py $GLOBAL_OPTIONS --output output/$outputname $@
 }
 
