@@ -294,7 +294,7 @@ def extract_distributional_features(left, right):
 
 def extract_vecraw_features(word, name, space):
     try:
-        vector = space[word.lemma_pos]
+        vector = space[lemma_pos(word)]
     except KeyError:
         return {
             'vector|%s_delta' % name: np.zeros(space.matrix.shape[1]),
@@ -311,8 +311,8 @@ def extract_asym_features(left, right, name, space):
         return {}
 
     try:
-        left_vector = space[left.lemma_pos]
-        right_vector = space[right.lemma_pos]
+        left_vector = space[lemma_pos(left)]
+        right_vector = space[lemma_pos(right)]
     except KeyError:
         return {
             'asym|%s_delta' % name: np.zeros(space.matrix.shape[1]),
