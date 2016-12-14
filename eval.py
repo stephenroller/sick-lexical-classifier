@@ -57,21 +57,7 @@ SPACE_ROOT = "/scratch/cluster/roller/spaces/giga+bnc+uk+wiki2015/output/svd"
 WINDOW_SPACE = os.path.join(SPACE_ROOT, "window20.svd300.ppmi.top250k.top20k.npz")
 DEP_SPACE = os.path.join(SPACE_ROOT, "dependency.svd300.ppmi.top250k.top1m.npz")
 
-# FEATURE SETTINGS
-ENABLE_MEMO = False
-ENABLE_WF = False
-ENABLE_DIST = False
-ENABLE_WN = False
-ENABLE_BASE = False
-ENABLE_GOLD = False
-ENABLE_ASYM = False
-ENABLE_LEFTVEC = False
-ENABLE_RIGHTVEC = False
-
-ENABLE_ALIGNMENT = False
-ENABLE_HEAD  = False
-
-ENABLE_DETAILED = False
+ARGS = None
 
 def percentage(binary_array):
     return float(np.sum(binary_array)) / binary_array.shape[0]
@@ -150,7 +136,7 @@ def find_alignments(left_tokens, right_tokens, space):
     return retval, list(left_tokens), list(right_tokens)
 
 def extract_wordnet_features(corenlp_left, corenlp_right):
-    if not ENABLE_WN:
+    if not ARGS.wn:
         return {}
 
     left_synsets = wordnet.synsets(corenlp_left.lemma_)
@@ -219,7 +205,7 @@ def bin_feature(hashtable, featurename, value):
     return hashtable
 
 def extract_distributional_features(left, right):
-    if not ENABLE_DIST:
+    if not ARGS.dist:
         return {}
 
     features = {}
@@ -259,7 +245,7 @@ def extract_vecraw_features(word, name, space):
     }
 
 def extract_asym_features(left, right, name, space):
-    if not ENABLE_ASYM:
+    if not ARGS.asym:
         return {}
 
     try:
@@ -282,7 +268,7 @@ def extract_asym_features(left, right, name, space):
 
 
 def extract_word_features(left, right):
-    if not ENABLE_WF:
+    if not ARGS.wf:
         return {}
 
     return {
@@ -381,7 +367,7 @@ def generate_features(irow, dist_space):
         'gold|neu': row['gsw'] == 0,
         'gold|ent': row['gsw'] == 1
     }
-    if ENABLE_GOLD:
+    if ARGS.gold:
         final_features = feature_union(final_features, gold_feature)
 
     base_features = {
@@ -396,10 +382,10 @@ def generate_features(irow, dist_space):
         'base|percent_hanging_left': len(hanging_left) / float(len(left_tokens)),
         'base|percent_hanging_right': len(hanging_right) / float(len(right_tokens)),
     }
-    if ENABLE_BASE:
+    if ARGS.base:
         final_features = feature_union(final_features, base_features)
 
-    if ENABLE_ALIGNMENT:
+    if ARGS.align:
         features_from_alignment = []
         for left, right in alignments:
             word_features = extract_word_features(left, right)
@@ -410,17 +396,16 @@ def generate_features(irow, dist_space):
         features_from_alignment = feature_merge(features_from_alignment, 'align')
         final_features = feature_union(final_features, features_from_alignment)
 
-    if ENABLE_HEAD:
+    if ARGS.head:
         features_from_head = feature_union(
             extract_word_features(left_head, right_head),
             extract_wordnet_features(left_head, right_head),
             extract_distributional_features(left_head, right_head),
-            extract_islams_features(row),
             extract_asym_features(left_head, right_head, "dep", dist_space),
         )
-        if ENABLE_LEFTVEC:
+        if ARGS.lhsvec:
             final_features = feature_union(final_features, extract_vecraw_features(left_head, "leftdep", dep_space))
-        if ENABLE_RIGHTVEC:
+        if ARGS.rhsvec:
             final_features = feature_union(final_features, extract_vecraw_features(right_head, "rightdep", dep_space))
         final_features = feature_union(final_features, features_from_head)
 
@@ -517,7 +502,7 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     data['prob_pred'] = probas.max(axis=1)
     if not output_filename.startswith("None"):
         original_data.to_csv(output_filename + ".cv", sep="\t", index=False)
-    if not output_filename.startswith("None") and ENABLE_DETAILED:
+    if not output_filename.startswith("None") and ARGS.detailed:
         del data['corenlp_left']
         del data['corenlp_right']
         if 'asym|dep_delta' in data:
@@ -550,7 +535,7 @@ def predict_test(output_filename, X, Y, Xt, original_test, test_data):
     if not output_filename.startswith("None"):
         original_test.to_csv(output_filename, sep="\t", index=False)
     test_data['w'] =  predictions
-    if not output_filename.startswith("None") and ENABLE_DETAILED:
+    if not output_filename.startswith("None") and ARGS.detailed:
         del test_data['corenlp_left']
         del test_data['corenlp_right']
         if 'asym|delta_dep' in test_data:
@@ -579,7 +564,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Lexical Entailment Prediction')
 
     # feature sets
-    parser.add_argument('--memo', action='store_true')
     parser.add_argument('--wf', action='store_true')
     parser.add_argument('--dist', action='store_true')
     parser.add_argument('--wn', action='store_true')
@@ -599,24 +583,11 @@ if __name__ == '__main__':
     parser.add_argument('--output')
     parser.add_argument('--detailed', action='store_true')
 
-    args = parser.parse_args()
-
-    ENABLE_MEMO = args.memo
-    ENABLE_WF = args.wf
-    ENABLE_DIST = args.dist
-    ENABLE_WN = args.wn
-    ENABLE_BASE = args.base
-    ENABLE_GOLD = args.gold
-    ENABLE_HEAD = args.head
-    ENABLE_ASYM = args.asym
-    ENABLE_LEFTVEC = args.lhsvec
-    ENABLE_RIGHTVEC = args.rhsvec
-
-    ENABLE_ALIGNMENT = args.align
-    ENABLE_DETAILED = args.detailed
+    ARGS = parser.parse_args()
 
     sys.stderr.write("Arguments:\n")
-    sys.stderr.write(str(args))
+    for k, v in ARGS.__dict__.iteritems():
+        sys.stderr.write("    %s: %s" % (k, v))
     sys.stderr.write("\n")
 
     sys.stderr.write("Using data file: %s\n" % DATA_FILE)
@@ -636,19 +607,18 @@ if __name__ == '__main__':
     test_data['corenlp_left'] = parse_sentences(test_data['text'])
     test_data['corenlp_right'] = parse_sentences(test_data['hypothesis'])
 
-    if args.solo:
+    if ARGS.solo:
         # only look at items that need a single rule
         pairCounts = Counter(data['pairIndex'])
         data = data[[pairCounts[pi] == 1 for pi in data['pairIndex']]].reset_index()
 
-    if args.nophrase:
+    if ARGS.nophrase:
         data = data[data['isInWordnet'] != 'Phrasal'].reset_index()
         test_data = test_data[test_data['isInWordnet'] != 'Phrasal'].reset_index()
-    if args.nolex:
+    if ARGS.nolex:
         data = data[data['isInWordnet'] == 'Phrasal'].reset_index()
         test_data = test_data[test_data['isInWordnet'] == 'Phrasal'].reset_index()
 
-    #data.gsw[data['isInWordnet'] == 'Hypernym'] = 1
     original_data = data.copy()
     del original_data['corenlp_left']
     del original_data['corenlp_right']
@@ -706,7 +676,7 @@ if __name__ == '__main__':
     X = scaler.fit_transform(X)
     Xt = scaler.transform(Xt)
 
-    predict_test("%s/%s" % (args.output, basename(TEST_FILE)), X, Y, Xt, original_test, test_data)
+    predict_test("%s/%s" % (ARGS.output, basename(TEST_FILE)), X, Y, Xt, original_test, test_data)
 
     # time for actual machine learning
 
@@ -720,5 +690,5 @@ if __name__ == '__main__':
     # look up each group number to determine the fold
     skf = cross_validation.LeaveOneLabelOut([splitLookup[sickID] for sickID in data['pairIndex']])
 
-    run_crossval("%s/%s" % (args.output, basename(DATA_FILE)), X, Y, skf, original_data, data)
+    run_crossval("%s/%s" % (ARGS.output, basename(DATA_FILE)), X, Y, skf, original_data, data)
 
