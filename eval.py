@@ -55,7 +55,7 @@ NUM_CROSS_VAL = 10
 # spaces:
 SPACE_ROOT = "/scratch/cluster/roller/spaces/giga+bnc+uk+wiki2015/output/svd"
 WINDOW_SPACE = os.path.join(SPACE_ROOT, "window20.svd300.ppmi.top250k.top20k.npz")
-DEP_SPACE = os.path.join(SPACE_ROOT, "dependency.svd300.ppmi.top250k.top1m.npz")
+DEP_SPACE = os.path.join(SPACE_ROOT, "withcontext.dependency.svd300.ppmi.top250k.top1m.npz")
 
 ARGS = None
 
@@ -203,6 +203,61 @@ def bin_feature(hashtable, featurename, value):
         n = "%s_%.2f<x<=%.2f" % (featurename, asfloat, upper)
         hashtable[n] = (asfloat < value <= upper)
     return hashtable
+
+def _dependency_contexts(token):
+    # TODO: convert this closer to stanford dependencies
+    retval = []
+    if token.head is not token:
+        retval.append('%s-1+%s' % (token.dep_, lemma_pos(token)))
+    for c in token.children:
+        retval.append('%s+%s' % (c.dep_, lemma_pos(c)))
+    retval = [r for r in retval if r in dep_space.clookup]
+    return retval
+
+def extract_context_similarities(left, right):
+    if not ARGS.context:
+        return {}
+
+    def clookups(lst):
+        if not lst:
+            return np.zeros((1, dep_space.cmatrix.shape[1]))
+        else:
+            return np.array([dep_space.cmatrix[dep_space.clookup[x]] for x in lst])
+
+    vector_left = dep_space.matrix[dep_space.lookup.get(lemma_pos(left), 0)]
+    vector_right = dep_space.matrix[dep_space.lookup.get(lemma_pos(right), 0)]
+
+    contexts_left = clookups(_dependency_contexts(left))
+    contexts_right = clookups(_dependency_contexts(right))
+
+    agreements_left = contexts_left.dot(vector_left)
+    agreements_right = contexts_right.dot(vector_right)
+
+    cross_left = contexts_left.dot(vector_right)
+    cross_right = contexts_right.dot(vector_left)
+
+    cross_contexts = contexts_left.dot(contexts_right.T)
+
+    return {
+        'ctx|agree_left_min': np.min(agreements_left),
+        'ctx|agree_left_mean': np.mean(agreements_left),
+        'ctx|agree_left_max': np.max(agreements_left),
+        'ctx|agree_right_min': np.min(agreements_right),
+        'ctx|agree_right_mean': np.mean(agreements_right),
+        'ctx|agree_right_max': np.max(agreements_right),
+
+        'ctx|cross_left_min': np.min(cross_left),
+        'ctx|cross_left_mean': np.mean(cross_left),
+        'ctx|cross_left_max': np.max(cross_left),
+        'ctx|cross_right_min': np.min(cross_right),
+        'ctx|cross_right_mean': np.mean(cross_right),
+        'ctx|cross_right_max': np.max(cross_right),
+
+        'ctx|cross_contexts_min': np.min(cross_contexts),
+        'ctx|cross_contexts_mean': np.mean(cross_contexts),
+        'ctx|cross_contexts_max': np.max(cross_contexts),
+    }
+
 
 def extract_distributional_features(left, right):
     if not ARGS.dist:
@@ -388,16 +443,18 @@ def generate_features(irow, dist_space):
     if ARGS.align:
         features_from_alignment = []
         for left, right in alignments:
+            context_features = extract_context_similarities(left, right)
             word_features = extract_word_features(left, right)
             wn_features = extract_wordnet_features(left, right)
             dist_features = extract_distributional_features(left, right)
-            all_features = feature_union(word_features, wn_features, dist_features)
+            all_features = feature_union(context_features, word_features, wn_features, dist_features)
             features_from_alignment.append(all_features)
         features_from_alignment = feature_merge(features_from_alignment, 'align')
         final_features = feature_union(final_features, features_from_alignment)
 
     if ARGS.head:
         features_from_head = feature_union(
+            extract_context_similarities(left_head, right_head),
             extract_word_features(left_head, right_head),
             extract_wordnet_features(left_head, right_head),
             extract_distributional_features(left_head, right_head),
@@ -469,7 +526,6 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     accs = [x['accuracy'] for x in results]
     accs_mean = np.mean(accs)
     sys.stderr.write("Accu: %6.3f +/- %6.3f\n" % (accs_mean, 2 * np.std(accs)))
-    sys.stderr.write("Accu: %s\n" % (accs))
 
     indices = reduce(add, (list(x['test_fold']) for x in results))
     predictions_reordered = reduce(add, [list(x['predictions']) for x in results])
@@ -570,6 +626,7 @@ if __name__ == '__main__':
     parser.add_argument('--asym', action='store_true')
     parser.add_argument('--lhsvec', action='store_true')
     parser.add_argument('--rhsvec', action='store_true')
+    parser.add_argument('--context', action='store_true')
 
     parser.add_argument('--align', action='store_true')
     parser.add_argument('--head', action='store_true')
@@ -593,7 +650,7 @@ if __name__ == '__main__':
 
     sys.stderr.write("Loading spaces...\n")
     bow_space = utdeftvs.load_numpy(WINDOW_SPACE)
-    dep_space = utdeftvs.load_numpy(DEP_SPACE)
+    dep_space = utdeftvs.load_numpy(DEP_SPACE, True)
 
     sys.stderr.write("Reading data...\n")
     data = pd.read_table(DATA_FILE)
