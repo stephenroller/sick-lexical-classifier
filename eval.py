@@ -466,12 +466,10 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     sys.stderr.write("Classifier: %s\n" % klassifier_factory())
     baselines = [x['baseline'] for x in results]
     baseline_mean = np.mean(baselines)
-    sys.stderr.write("Base: %6.3f +/- %6.3f\n" % (baseline_mean, 2 * np.std(baselines)))
-    #sys.stderr.write("Base: %s\n" % (baselines))
     accs = [x['accuracy'] for x in results]
     accs_mean = np.mean(accs)
     sys.stderr.write("Accu: %6.3f +/- %6.3f\n" % (accs_mean, 2 * np.std(accs)))
-    #sys.stderr.write("Accu: %s\n" % (accs))
+    sys.stderr.write("Accu: %s\n" % (accs))
 
     indices = reduce(add, (list(x['test_fold']) for x in results))
     predictions_reordered = reduce(add, [list(x['predictions']) for x in results])
@@ -587,7 +585,7 @@ if __name__ == '__main__':
 
     sys.stderr.write("Arguments:\n")
     for k, v in ARGS.__dict__.iteritems():
-        sys.stderr.write("    %s: %s" % (k, v))
+        sys.stderr.write("    %s: %s\n" % (k, v))
     sys.stderr.write("\n")
 
     sys.stderr.write("Using data file: %s\n" % DATA_FILE)
