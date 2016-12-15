@@ -368,9 +368,7 @@ def find_tokens(sentence, islam_tokens):
     for t, s, p in islam_tokens:
         possible = [token for token in sentence if token.orth_ == t]
         if not possible:
-            print t
-            print sentence
-            print "wasnt possible"
+            sys.stderr.write("Wasn't possible: %s [%s]\n" % (t, sentence))
         else:
             found = min(possible, key=lambda x: np.square(x.idx - p))
             retval.append(found)
@@ -521,8 +519,6 @@ def run_crossval(output_filename, X, Y, folds, original_data, data):
     THE_POOL.close()
 
     sys.stderr.write("Classifier: %s\n" % klassifier_factory())
-    baselines = [x['baseline'] for x in results]
-    baseline_mean = np.mean(baselines)
     accs = [x['accuracy'] for x in results]
     accs_mean = np.mean(accs)
     sys.stderr.write("Accu: %6.3f +/- %6.3f\n" % (accs_mean, 2 * np.std(accs)))
